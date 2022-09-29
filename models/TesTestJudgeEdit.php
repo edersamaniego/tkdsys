@@ -1,0 +1,1437 @@
+<?php
+
+namespace PHPMaker2022\school;
+
+use Doctrine\DBAL\ParameterType;
+use Doctrine\DBAL\FetchMode;
+use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Query\QueryBuilder;
+
+/**
+ * Page class
+ */
+class TesTestJudgeEdit extends TesTestJudge
+{
+    use MessagesTrait;
+
+    // Page ID
+    public $PageID = "edit";
+
+    // Project ID
+    public $ProjectID = PROJECT_ID;
+
+    // Table name
+    public $TableName = 'tes_test_judge';
+
+    // Page object name
+    public $PageObjName = "TesTestJudgeEdit";
+
+    // View file path
+    public $View = null;
+
+    // Title
+    public $Title = null; // Title for <title> tag
+
+    // Rendering View
+    public $RenderingView = false;
+
+    // Page headings
+    public $Heading = "";
+    public $Subheading = "";
+    public $PageHeader;
+    public $PageFooter;
+
+    // Page layout
+    public $UseLayout = true;
+
+    // Page terminated
+    private $terminated = false;
+
+    // Page heading
+    public function pageHeading()
+    {
+        global $Language;
+        if ($this->Heading != "") {
+            return $this->Heading;
+        }
+        if (method_exists($this, "tableCaption")) {
+            return $this->tableCaption();
+        }
+        return "";
+    }
+
+    // Page subheading
+    public function pageSubheading()
+    {
+        global $Language;
+        if ($this->Subheading != "") {
+            return $this->Subheading;
+        }
+        if ($this->TableName) {
+            return $Language->phrase($this->PageID);
+        }
+        return "";
+    }
+
+    // Page name
+    public function pageName()
+    {
+        return CurrentPageName();
+    }
+
+    // Page URL
+    public function pageUrl($withArgs = true)
+    {
+        $route = GetRoute();
+        $args = RemoveXss($route->getArguments());
+        if (!$withArgs) {
+            foreach ($args as $key => &$val) {
+                $val = "";
+            }
+            unset($val);
+        }
+        $url = rtrim(UrlFor($route->getName(), $args), "/") . "?";
+        if ($this->UseTokenInUrl) {
+            $url .= "t=" . $this->TableVar . "&"; // Add page token
+        }
+        return $url;
+    }
+
+    // Show Page Header
+    public function showPageHeader()
+    {
+        $header = $this->PageHeader;
+        $this->pageDataRendering($header);
+        if ($header != "") { // Header exists, display
+            echo '<p id="ew-page-header">' . $header . '</p>';
+        }
+    }
+
+    // Show Page Footer
+    public function showPageFooter()
+    {
+        $footer = $this->PageFooter;
+        $this->pageDataRendered($footer);
+        if ($footer != "") { // Footer exists, display
+            echo '<p id="ew-page-footer">' . $footer . '</p>';
+        }
+    }
+
+    // Validate page request
+    protected function isPageRequest()
+    {
+        global $CurrentForm;
+        if ($this->UseTokenInUrl) {
+            if ($CurrentForm) {
+                return $this->TableVar == $CurrentForm->getValue("t");
+            }
+            if (Get("t") !== null) {
+                return $this->TableVar == Get("t");
+            }
+        }
+        return true;
+    }
+
+    // Constructor
+    public function __construct()
+    {
+        global $Language, $DashboardReport, $DebugTimer;
+        global $UserTable;
+
+        // Initialize
+        $GLOBALS["Page"] = &$this;
+
+        // Language object
+        $Language = Container("language");
+
+        // Parent constuctor
+        parent::__construct();
+
+        // Table object (tes_test_judge)
+        if (!isset($GLOBALS["tes_test_judge"]) || get_class($GLOBALS["tes_test_judge"]) == PROJECT_NAMESPACE . "tes_test_judge") {
+            $GLOBALS["tes_test_judge"] = &$this;
+        }
+
+        // Table name (for backward compatibility only)
+        if (!defined(PROJECT_NAMESPACE . "TABLE_NAME")) {
+            define(PROJECT_NAMESPACE . "TABLE_NAME", 'tes_test_judge');
+        }
+
+        // Start timer
+        $DebugTimer = Container("timer");
+
+        // Debug message
+        LoadDebugMessage();
+
+        // Open connection
+        $GLOBALS["Conn"] = $GLOBALS["Conn"] ?? $this->getConnection();
+
+        // User table object
+        $UserTable = Container("usertable");
+    }
+
+    // Get content from stream
+    public function getContents($stream = null): string
+    {
+        global $Response;
+        return is_object($Response) ? $Response->getBody() : ob_get_clean();
+    }
+
+    // Is lookup
+    public function isLookup()
+    {
+        return SameText(Route(0), Config("API_LOOKUP_ACTION"));
+    }
+
+    // Is AutoFill
+    public function isAutoFill()
+    {
+        return $this->isLookup() && SameText(Post("ajax"), "autofill");
+    }
+
+    // Is AutoSuggest
+    public function isAutoSuggest()
+    {
+        return $this->isLookup() && SameText(Post("ajax"), "autosuggest");
+    }
+
+    // Is modal lookup
+    public function isModalLookup()
+    {
+        return $this->isLookup() && SameText(Post("ajax"), "modal");
+    }
+
+    // Is terminated
+    public function isTerminated()
+    {
+        return $this->terminated;
+    }
+
+    /**
+     * Terminate page
+     *
+     * @param string $url URL for direction
+     * @return void
+     */
+    public function terminate($url = "")
+    {
+        if ($this->terminated) {
+            return;
+        }
+        global $ExportFileName, $TempImages, $DashboardReport, $Response;
+
+        // Page is terminated
+        $this->terminated = true;
+
+         // Page Unload event
+        if (method_exists($this, "pageUnload")) {
+            $this->pageUnload();
+        }
+
+        // Global Page Unloaded event (in userfn*.php)
+        Page_Unloaded();
+
+        // Export
+        if ($this->CustomExport && $this->CustomExport == $this->Export && array_key_exists($this->CustomExport, Config("EXPORT_CLASSES"))) {
+            $content = $this->getContents();
+            if ($ExportFileName == "") {
+                $ExportFileName = $this->TableVar;
+            }
+            $class = PROJECT_NAMESPACE . Config("EXPORT_CLASSES." . $this->CustomExport);
+            if (class_exists($class)) {
+                $tbl = Container("tes_test_judge");
+                $doc = new $class($tbl);
+                $doc->Text = @$content;
+                if ($this->isExport("email")) {
+                    echo $this->exportEmail($doc->Text);
+                } else {
+                    $doc->export();
+                }
+                DeleteTempImages(); // Delete temp images
+                return;
+            }
+        }
+        if (!IsApi() && method_exists($this, "pageRedirecting")) {
+            $this->pageRedirecting($url);
+        }
+
+        // Close connection
+        CloseConnections();
+
+        // Return for API
+        if (IsApi()) {
+            $res = $url === true;
+            if (!$res) { // Show error
+                WriteJson(array_merge(["success" => false], $this->getMessages()));
+            }
+            return;
+        } else { // Check if response is JSON
+            if (StartsString("application/json", $Response->getHeaderLine("Content-type")) && $Response->getBody()->getSize()) { // With JSON response
+                $this->clearMessages();
+                return;
+            }
+        }
+
+        // Go to URL if specified
+        if ($url != "") {
+            if (!Config("DEBUG") && ob_get_length()) {
+                ob_end_clean();
+            }
+
+            // Handle modal response
+            if ($this->IsModal) { // Show as modal
+                $row = ["url" => GetUrl($url), "modal" => "1"];
+                $pageName = GetPageName($url);
+                if ($pageName != $this->getListUrl()) { // Not List page
+                    $row["caption"] = $this->getModalCaption($pageName);
+                    if ($pageName == "TesTestJudgeView") {
+                        $row["view"] = "1";
+                    }
+                } else { // List page should not be shown as modal => error
+                    $row["error"] = $this->getFailureMessage();
+                    $this->clearFailureMessage();
+                }
+                WriteJson($row);
+            } else {
+                SaveDebugMessage();
+                Redirect(GetUrl($url));
+            }
+        }
+        return; // Return to controller
+    }
+
+    // Get records from recordset
+    protected function getRecordsFromRecordset($rs, $current = false)
+    {
+        $rows = [];
+        if (is_object($rs)) { // Recordset
+            while ($rs && !$rs->EOF) {
+                $this->loadRowValues($rs); // Set up DbValue/CurrentValue
+                $row = $this->getRecordFromArray($rs->fields);
+                if ($current) {
+                    return $row;
+                } else {
+                    $rows[] = $row;
+                }
+                $rs->moveNext();
+            }
+        } elseif (is_array($rs)) {
+            foreach ($rs as $ar) {
+                $row = $this->getRecordFromArray($ar);
+                if ($current) {
+                    return $row;
+                } else {
+                    $rows[] = $row;
+                }
+            }
+        }
+        return $rows;
+    }
+
+    // Get record from array
+    protected function getRecordFromArray($ar)
+    {
+        $row = [];
+        if (is_array($ar)) {
+            foreach ($ar as $fldname => $val) {
+                if (array_key_exists($fldname, $this->Fields) && ($this->Fields[$fldname]->Visible || $this->Fields[$fldname]->IsPrimaryKey)) { // Primary key or Visible
+                    $fld = &$this->Fields[$fldname];
+                    if ($fld->HtmlTag == "FILE") { // Upload field
+                        if (EmptyValue($val)) {
+                            $row[$fldname] = null;
+                        } else {
+                            if ($fld->DataType == DATATYPE_BLOB) {
+                                $url = FullUrl(GetApiUrl(Config("API_FILE_ACTION") .
+                                    "/" . $fld->TableVar . "/" . $fld->Param . "/" . rawurlencode($this->getRecordKeyValue($ar))));
+                                $row[$fldname] = ["type" => ContentType($val), "url" => $url, "name" => $fld->Param . ContentExtension($val)];
+                            } elseif (!$fld->UploadMultiple || !ContainsString($val, Config("MULTIPLE_UPLOAD_SEPARATOR"))) { // Single file
+                                $url = FullUrl(GetApiUrl(Config("API_FILE_ACTION") .
+                                    "/" . $fld->TableVar . "/" . Encrypt($fld->physicalUploadPath() . $val)));
+                                $row[$fldname] = ["type" => MimeContentType($val), "url" => $url, "name" => $val];
+                            } else { // Multiple files
+                                $files = explode(Config("MULTIPLE_UPLOAD_SEPARATOR"), $val);
+                                $ar = [];
+                                foreach ($files as $file) {
+                                    $url = FullUrl(GetApiUrl(Config("API_FILE_ACTION") .
+                                        "/" . $fld->TableVar . "/" . Encrypt($fld->physicalUploadPath() . $file)));
+                                    if (!EmptyValue($file)) {
+                                        $ar[] = ["type" => MimeContentType($file), "url" => $url, "name" => $file];
+                                    }
+                                }
+                                $row[$fldname] = $ar;
+                            }
+                        }
+                    } else {
+                        $row[$fldname] = $val;
+                    }
+                }
+            }
+        }
+        return $row;
+    }
+
+    // Get record key value from array
+    protected function getRecordKeyValue($ar)
+    {
+        $key = "";
+        if (is_array($ar)) {
+            $key .= @$ar['id'];
+        }
+        return $key;
+    }
+
+    /**
+     * Hide fields for add/edit
+     *
+     * @return void
+     */
+    protected function hideFieldsForAddEdit()
+    {
+        if ($this->isAdd() || $this->isCopy() || $this->isGridAdd()) {
+            $this->id->Visible = false;
+        }
+    }
+
+    // Lookup data
+    public function lookup($ar = null)
+    {
+        global $Language, $Security;
+
+        // Get lookup object
+        $fieldName = $ar["field"] ?? Post("field");
+        $lookup = $this->Fields[$fieldName]->Lookup;
+
+        // Get lookup parameters
+        $lookupType = $ar["ajax"] ?? Post("ajax", "unknown");
+        $pageSize = -1;
+        $offset = -1;
+        $searchValue = "";
+        if (SameText($lookupType, "modal") || SameText($lookupType, "filter")) {
+            $searchValue = $ar["q"] ?? Param("q") ?? $ar["sv"] ?? Post("sv", "");
+            $pageSize = $ar["n"] ?? Param("n") ?? $ar["recperpage"] ?? Post("recperpage", 10);
+        } elseif (SameText($lookupType, "autosuggest")) {
+            $searchValue = $ar["q"] ?? Param("q", "");
+            $pageSize = $ar["n"] ?? Param("n", -1);
+            $pageSize = is_numeric($pageSize) ? (int)$pageSize : -1;
+            if ($pageSize <= 0) {
+                $pageSize = Config("AUTO_SUGGEST_MAX_ENTRIES");
+            }
+        }
+        $start = $ar["start"] ?? Param("start", -1);
+        $start = is_numeric($start) ? (int)$start : -1;
+        $page = $ar["page"] ?? Param("page", -1);
+        $page = is_numeric($page) ? (int)$page : -1;
+        $offset = $start >= 0 ? $start : ($page > 0 && $pageSize > 0 ? ($page - 1) * $pageSize : 0);
+        $userSelect = Decrypt($ar["s"] ?? Post("s", ""));
+        $userFilter = Decrypt($ar["f"] ?? Post("f", ""));
+        $userOrderBy = Decrypt($ar["o"] ?? Post("o", ""));
+        $keys = $ar["keys"] ?? Post("keys");
+        $lookup->LookupType = $lookupType; // Lookup type
+        $lookup->FilterValues = []; // Clear filter values first
+        if ($keys !== null) { // Selected records from modal
+            if (is_array($keys)) {
+                $keys = implode(Config("MULTIPLE_OPTION_SEPARATOR"), $keys);
+            }
+            $lookup->FilterFields = []; // Skip parent fields if any
+            $lookup->FilterValues[] = $keys; // Lookup values
+            $pageSize = -1; // Show all records
+        } else { // Lookup values
+            $lookup->FilterValues[] = $ar["v0"] ?? $ar["lookupValue"] ?? Post("v0", Post("lookupValue", ""));
+        }
+        $cnt = is_array($lookup->FilterFields) ? count($lookup->FilterFields) : 0;
+        for ($i = 1; $i <= $cnt; $i++) {
+            $lookup->FilterValues[] = $ar["v" . $i] ?? Post("v" . $i, "");
+        }
+        $lookup->SearchValue = $searchValue;
+        $lookup->PageSize = $pageSize;
+        $lookup->Offset = $offset;
+        if ($userSelect != "") {
+            $lookup->UserSelect = $userSelect;
+        }
+        if ($userFilter != "") {
+            $lookup->UserFilter = $userFilter;
+        }
+        if ($userOrderBy != "") {
+            $lookup->UserOrderBy = $userOrderBy;
+        }
+        return $lookup->toJson($this, !is_array($ar)); // Use settings from current page
+    }
+
+    // Properties
+    public $FormClassName = "ew-form ew-edit-form";
+    public $IsModal = false;
+    public $IsMobileOrModal = false;
+    public $DbMasterFilter;
+    public $DbDetailFilter;
+    public $HashValue; // Hash Value
+    public $DisplayRecords = 1;
+    public $StartRecord;
+    public $StopRecord;
+    public $TotalRecords = 0;
+    public $RecordRange = 10;
+    public $RecordCount;
+
+    /**
+     * Page run
+     *
+     * @return void
+     */
+    public function run()
+    {
+        global $ExportType, $CustomExportType, $ExportFileName, $UserProfile, $Language, $Security, $CurrentForm,
+            $SkipHeaderFooter;
+
+        // Is modal
+        $this->IsModal = Param("modal") == "1";
+        $this->UseLayout = $this->UseLayout && !$this->IsModal;
+
+        // Use layout
+        $this->UseLayout = $this->UseLayout && ConvertToBool(Param("layout", true));
+
+        // Create form object
+        $CurrentForm = new HttpForm();
+        $this->CurrentAction = Param("action"); // Set up current action
+        $this->id->setVisibility();
+        $this->judgeMemberId->setVisibility();
+        $this->testId->setVisibility();
+        $this->rankId->setVisibility();
+        $this->instructorRegister->setVisibility();
+        $this->federationRegister->setVisibility();
+        $this->memberCityId->setVisibility();
+        $this->hideFieldsForAddEdit();
+
+        // Set lookup cache
+        if (!in_array($this->PageID, Config("LOOKUP_CACHE_PAGE_IDS"))) {
+            $this->setUseLookupCache(false);
+        }
+
+        // Global Page Loading event (in userfn*.php)
+        Page_Loading();
+
+        // Page Load event
+        if (method_exists($this, "pageLoad")) {
+            $this->pageLoad();
+        }
+
+        // Set up lookup cache
+
+        // Check modal
+        if ($this->IsModal) {
+            $SkipHeaderFooter = true;
+        }
+        $this->IsMobileOrModal = IsMobile() || $this->IsModal;
+        $this->FormClassName = "ew-form ew-edit-form";
+
+        // Load record by position
+        $loadByPosition = false;
+        $loaded = false;
+        $postBack = false;
+
+        // Set up current action and primary key
+        if (IsApi()) {
+            // Load key values
+            $loaded = true;
+            if (($keyValue = Get("id") ?? Key(0) ?? Route(2)) !== null) {
+                $this->id->setQueryStringValue($keyValue);
+                $this->id->setOldValue($this->id->QueryStringValue);
+            } elseif (Post("id") !== null) {
+                $this->id->setFormValue(Post("id"));
+                $this->id->setOldValue($this->id->FormValue);
+            } else {
+                $loaded = false; // Unable to load key
+            }
+
+            // Load record
+            if ($loaded) {
+                $loaded = $this->loadRow();
+            }
+            if (!$loaded) {
+                $this->setFailureMessage($Language->phrase("NoRecord")); // Set no record message
+                $this->terminate();
+                return;
+            }
+            $this->CurrentAction = "update"; // Update record directly
+            $this->OldKey = $this->getKey(true); // Get from CurrentValue
+            $postBack = true;
+        } else {
+            if (Post("action") !== null) {
+                $this->CurrentAction = Post("action"); // Get action code
+                if (!$this->isShow()) { // Not reload record, handle as postback
+                    $postBack = true;
+                }
+
+                // Get key from Form
+                $this->setKey(Post($this->OldKeyName), $this->isShow());
+            } else {
+                $this->CurrentAction = "show"; // Default action is display
+
+                // Load key from QueryString
+                $loadByQuery = false;
+                if (($keyValue = Get("id") ?? Route("id")) !== null) {
+                    $this->id->setQueryStringValue($keyValue);
+                    $loadByQuery = true;
+                } else {
+                    $this->id->CurrentValue = null;
+                }
+                if (!$loadByQuery || Get(Config("TABLE_START_REC")) !== null) {
+                    $loadByPosition = true;
+                }
+            }
+
+            // Load recordset
+            if ($this->isShow()) {
+                if (!$this->IsModal) { // Normal edit page
+                    $this->StartRecord = 1; // Initialize start position
+                    if ($rs = $this->loadRecordset()) { // Load records
+                        $this->TotalRecords = $rs->recordCount(); // Get record count
+                    }
+                    if ($this->TotalRecords <= 0) { // No record found
+                        if ($this->getSuccessMessage() == "" && $this->getFailureMessage() == "") {
+                            $this->setFailureMessage($Language->phrase("NoRecord")); // Set no record message
+                        }
+                        $this->terminate("TesTestJudgeList"); // Return to list page
+                        return;
+                    } elseif ($loadByPosition) { // Load record by position
+                        $this->setupStartRecord(); // Set up start record position
+                        // Point to current record
+                        if ($this->StartRecord <= $this->TotalRecords) {
+                            $rs->move($this->StartRecord - 1);
+                            $loaded = true;
+                        }
+                    } else { // Match key values
+                        if ($this->id->CurrentValue != null) {
+                            while (!$rs->EOF) {
+                                if (SameString($this->id->CurrentValue, $rs->fields['id'])) {
+                                    $this->setStartRecordNumber($this->StartRecord); // Save record position
+                                    $loaded = true;
+                                    break;
+                                } else {
+                                    $this->StartRecord++;
+                                    $rs->moveNext();
+                                }
+                            }
+                        }
+                    }
+
+                    // Load current row values
+                    if ($loaded) {
+                        $this->loadRowValues($rs);
+                    }
+                } else {
+                    // Load current record
+                    $loaded = $this->loadRow();
+                } // End modal checking
+                $this->OldKey = $loaded ? $this->getKey(true) : ""; // Get from CurrentValue
+            }
+        }
+
+        // Process form if post back
+        if ($postBack) {
+            $this->loadFormValues(); // Get form values
+        }
+
+        // Validate form if post back
+        if ($postBack) {
+            if (!$this->validateForm()) {
+                $this->EventCancelled = true; // Event cancelled
+                $this->restoreFormValues();
+                if (IsApi()) {
+                    $this->terminate();
+                    return;
+                } else {
+                    $this->CurrentAction = ""; // Form error, reset action
+                }
+            }
+        }
+
+        // Perform current action
+        switch ($this->CurrentAction) {
+            case "show": // Get a record to display
+                if (!$this->IsModal) { // Normal edit page
+                    if (!$loaded) {
+                        if ($this->getSuccessMessage() == "" && $this->getFailureMessage() == "") {
+                            $this->setFailureMessage($Language->phrase("NoRecord")); // Set no record message
+                        }
+                        $this->terminate("TesTestJudgeList"); // Return to list page
+                        return;
+                    } else {
+                    }
+                } else { // Modal edit page
+                    if (!$loaded) { // Load record based on key
+                        if ($this->getFailureMessage() == "") {
+                            $this->setFailureMessage($Language->phrase("NoRecord")); // No record found
+                        }
+                        $this->terminate("TesTestJudgeList"); // No matching record, return to list
+                        return;
+                    }
+                } // End modal checking
+                break;
+            case "update": // Update
+                $returnUrl = $this->getReturnUrl();
+                if (GetPageName($returnUrl) == "TesTestJudgeList") {
+                    $returnUrl = $this->addMasterUrl($returnUrl); // List page, return to List page with correct master key if necessary
+                }
+                $this->SendEmail = true; // Send email on update success
+                if ($this->editRow()) { // Update record based on key
+                    if ($this->getSuccessMessage() == "") {
+                        $this->setSuccessMessage($Language->phrase("UpdateSuccess")); // Update success
+                    }
+                    if (IsApi()) {
+                        $this->terminate(true);
+                        return;
+                    } else {
+                        $this->terminate($returnUrl); // Return to caller
+                        return;
+                    }
+                } elseif (IsApi()) { // API request, return
+                    $this->terminate();
+                    return;
+                } elseif ($this->getFailureMessage() == $Language->phrase("NoRecord")) {
+                    $this->terminate($returnUrl); // Return to caller
+                    return;
+                } else {
+                    $this->EventCancelled = true; // Event cancelled
+                    $this->restoreFormValues(); // Restore form values if update failed
+                }
+        }
+
+        // Set up Breadcrumb
+        $this->setupBreadcrumb();
+
+        // Render the record
+        $this->RowType = ROWTYPE_EDIT; // Render as Edit
+        $this->resetAttributes();
+        $this->renderRow();
+        if (!$this->IsModal) { // Normal view page
+            $this->Pager = new PrevNextPager($this->TableVar, $this->StartRecord, $this->DisplayRecords, $this->TotalRecords, "", $this->RecordRange, $this->AutoHidePager, false, false);
+            $this->Pager->PageNumberName = Config("TABLE_START_REC"); // Same as start record
+            $this->Pager->PagePhraseId = "Record"; // Show as record
+        }
+
+        // Set LoginStatus / Page_Rendering / Page_Render
+        if (!IsApi() && !$this->isTerminated()) {
+            // Setup login status
+            SetupLoginStatus();
+
+            // Pass login status to client side
+            SetClientVar("login", LoginStatus());
+
+            // Global Page Rendering event (in userfn*.php)
+            Page_Rendering();
+
+            // Page Render event
+            if (method_exists($this, "pageRender")) {
+                $this->pageRender();
+            }
+
+            // Render search option
+            if (method_exists($this, "renderSearchOptions")) {
+                $this->renderSearchOptions();
+            }
+        }
+    }
+
+    // Get upload files
+    protected function getUploadFiles()
+    {
+        global $CurrentForm, $Language;
+    }
+
+    // Load form values
+    protected function loadFormValues()
+    {
+        // Load from form
+        global $CurrentForm;
+        $validate = !Config("SERVER_VALIDATE");
+
+        // Check field name 'id' first before field var 'x_id'
+        $val = $CurrentForm->hasValue("id") ? $CurrentForm->getValue("id") : $CurrentForm->getValue("x_id");
+        if (!$this->id->IsDetailKey) {
+            $this->id->setFormValue($val);
+        }
+
+        // Check field name 'judgeMemberId' first before field var 'x_judgeMemberId'
+        $val = $CurrentForm->hasValue("judgeMemberId") ? $CurrentForm->getValue("judgeMemberId") : $CurrentForm->getValue("x_judgeMemberId");
+        if (!$this->judgeMemberId->IsDetailKey) {
+            if (IsApi() && $val === null) {
+                $this->judgeMemberId->Visible = false; // Disable update for API request
+            } else {
+                $this->judgeMemberId->setFormValue($val, true, $validate);
+            }
+        }
+
+        // Check field name 'testId' first before field var 'x_testId'
+        $val = $CurrentForm->hasValue("testId") ? $CurrentForm->getValue("testId") : $CurrentForm->getValue("x_testId");
+        if (!$this->testId->IsDetailKey) {
+            if (IsApi() && $val === null) {
+                $this->testId->Visible = false; // Disable update for API request
+            } else {
+                $this->testId->setFormValue($val, true, $validate);
+            }
+        }
+
+        // Check field name 'rankId' first before field var 'x_rankId'
+        $val = $CurrentForm->hasValue("rankId") ? $CurrentForm->getValue("rankId") : $CurrentForm->getValue("x_rankId");
+        if (!$this->rankId->IsDetailKey) {
+            if (IsApi() && $val === null) {
+                $this->rankId->Visible = false; // Disable update for API request
+            } else {
+                $this->rankId->setFormValue($val, true, $validate);
+            }
+        }
+
+        // Check field name 'instructorRegister' first before field var 'x_instructorRegister'
+        $val = $CurrentForm->hasValue("instructorRegister") ? $CurrentForm->getValue("instructorRegister") : $CurrentForm->getValue("x_instructorRegister");
+        if (!$this->instructorRegister->IsDetailKey) {
+            if (IsApi() && $val === null) {
+                $this->instructorRegister->Visible = false; // Disable update for API request
+            } else {
+                $this->instructorRegister->setFormValue($val);
+            }
+        }
+
+        // Check field name 'federationRegister' first before field var 'x_federationRegister'
+        $val = $CurrentForm->hasValue("federationRegister") ? $CurrentForm->getValue("federationRegister") : $CurrentForm->getValue("x_federationRegister");
+        if (!$this->federationRegister->IsDetailKey) {
+            if (IsApi() && $val === null) {
+                $this->federationRegister->Visible = false; // Disable update for API request
+            } else {
+                $this->federationRegister->setFormValue($val);
+            }
+        }
+
+        // Check field name 'memberCityId' first before field var 'x_memberCityId'
+        $val = $CurrentForm->hasValue("memberCityId") ? $CurrentForm->getValue("memberCityId") : $CurrentForm->getValue("x_memberCityId");
+        if (!$this->memberCityId->IsDetailKey) {
+            if (IsApi() && $val === null) {
+                $this->memberCityId->Visible = false; // Disable update for API request
+            } else {
+                $this->memberCityId->setFormValue($val, true, $validate);
+            }
+        }
+    }
+
+    // Restore form values
+    public function restoreFormValues()
+    {
+        global $CurrentForm;
+        $this->id->CurrentValue = $this->id->FormValue;
+        $this->judgeMemberId->CurrentValue = $this->judgeMemberId->FormValue;
+        $this->testId->CurrentValue = $this->testId->FormValue;
+        $this->rankId->CurrentValue = $this->rankId->FormValue;
+        $this->instructorRegister->CurrentValue = $this->instructorRegister->FormValue;
+        $this->federationRegister->CurrentValue = $this->federationRegister->FormValue;
+        $this->memberCityId->CurrentValue = $this->memberCityId->FormValue;
+    }
+
+    // Load recordset
+    public function loadRecordset($offset = -1, $rowcnt = -1)
+    {
+        // Load List page SQL (QueryBuilder)
+        $sql = $this->getListSql();
+
+        // Load recordset
+        if ($offset > -1) {
+            $sql->setFirstResult($offset);
+        }
+        if ($rowcnt > 0) {
+            $sql->setMaxResults($rowcnt);
+        }
+        $result = $sql->execute();
+        $rs = new Recordset($result, $sql);
+
+        // Call Recordset Selected event
+        $this->recordsetSelected($rs);
+        return $rs;
+    }
+
+    // Load records as associative array
+    public function loadRows($offset = -1, $rowcnt = -1)
+    {
+        // Load List page SQL (QueryBuilder)
+        $sql = $this->getListSql();
+
+        // Load recordset
+        if ($offset > -1) {
+            $sql->setFirstResult($offset);
+        }
+        if ($rowcnt > 0) {
+            $sql->setMaxResults($rowcnt);
+        }
+        $result = $sql->execute();
+        return $result->fetchAll(FetchMode::ASSOCIATIVE);
+    }
+
+    /**
+     * Load row based on key values
+     *
+     * @return void
+     */
+    public function loadRow()
+    {
+        global $Security, $Language;
+        $filter = $this->getRecordFilter();
+
+        // Call Row Selecting event
+        $this->rowSelecting($filter);
+
+        // Load SQL based on filter
+        $this->CurrentFilter = $filter;
+        $sql = $this->getCurrentSql();
+        $conn = $this->getConnection();
+        $res = false;
+        $row = $conn->fetchAssociative($sql);
+        if ($row) {
+            $res = true;
+            $this->loadRowValues($row); // Load row values
+        }
+        return $res;
+    }
+
+    /**
+     * Load row values from recordset or record
+     *
+     * @param Recordset|array $rs Record
+     * @return void
+     */
+    public function loadRowValues($rs = null)
+    {
+        if (is_array($rs)) {
+            $row = $rs;
+        } elseif ($rs && property_exists($rs, "fields")) { // Recordset
+            $row = $rs->fields;
+        } else {
+            $row = $this->newRow();
+        }
+        if (!$row) {
+            return;
+        }
+
+        // Call Row Selected event
+        $this->rowSelected($row);
+        $this->id->setDbValue($row['id']);
+        $this->judgeMemberId->setDbValue($row['judgeMemberId']);
+        $this->testId->setDbValue($row['testId']);
+        $this->rankId->setDbValue($row['rankId']);
+        $this->instructorRegister->setDbValue($row['instructorRegister']);
+        $this->federationRegister->setDbValue($row['federationRegister']);
+        $this->memberCityId->setDbValue($row['memberCityId']);
+    }
+
+    // Return a row with default values
+    protected function newRow()
+    {
+        $row = [];
+        $row['id'] = $this->id->DefaultValue;
+        $row['judgeMemberId'] = $this->judgeMemberId->DefaultValue;
+        $row['testId'] = $this->testId->DefaultValue;
+        $row['rankId'] = $this->rankId->DefaultValue;
+        $row['instructorRegister'] = $this->instructorRegister->DefaultValue;
+        $row['federationRegister'] = $this->federationRegister->DefaultValue;
+        $row['memberCityId'] = $this->memberCityId->DefaultValue;
+        return $row;
+    }
+
+    // Load old record
+    protected function loadOldRecord()
+    {
+        // Load old record
+        $this->OldRecordset = null;
+        $validKey = $this->OldKey != "";
+        if ($validKey) {
+            $this->CurrentFilter = $this->getRecordFilter();
+            $sql = $this->getCurrentSql();
+            $conn = $this->getConnection();
+            $this->OldRecordset = LoadRecordset($sql, $conn);
+        }
+        $this->loadRowValues($this->OldRecordset); // Load row values
+        return $validKey;
+    }
+
+    // Render row values based on field settings
+    public function renderRow()
+    {
+        global $Security, $Language, $CurrentLanguage;
+
+        // Initialize URLs
+
+        // Call Row_Rendering event
+        $this->rowRendering();
+
+        // Common render codes for all row types
+
+        // id
+        $this->id->RowCssClass = "row";
+
+        // judgeMemberId
+        $this->judgeMemberId->RowCssClass = "row";
+
+        // testId
+        $this->testId->RowCssClass = "row";
+
+        // rankId
+        $this->rankId->RowCssClass = "row";
+
+        // instructorRegister
+        $this->instructorRegister->RowCssClass = "row";
+
+        // federationRegister
+        $this->federationRegister->RowCssClass = "row";
+
+        // memberCityId
+        $this->memberCityId->RowCssClass = "row";
+
+        // View row
+        if ($this->RowType == ROWTYPE_VIEW) {
+            // id
+            $this->id->ViewValue = $this->id->CurrentValue;
+            $this->id->ViewCustomAttributes = "";
+
+            // judgeMemberId
+            $this->judgeMemberId->ViewValue = $this->judgeMemberId->CurrentValue;
+            $this->judgeMemberId->ViewValue = FormatNumber($this->judgeMemberId->ViewValue, $this->judgeMemberId->formatPattern());
+            $this->judgeMemberId->ViewCustomAttributes = "";
+
+            // testId
+            $this->testId->ViewValue = $this->testId->CurrentValue;
+            $this->testId->ViewValue = FormatNumber($this->testId->ViewValue, $this->testId->formatPattern());
+            $this->testId->ViewCustomAttributes = "";
+
+            // rankId
+            $this->rankId->ViewValue = $this->rankId->CurrentValue;
+            $this->rankId->ViewValue = FormatNumber($this->rankId->ViewValue, $this->rankId->formatPattern());
+            $this->rankId->ViewCustomAttributes = "";
+
+            // instructorRegister
+            $this->instructorRegister->ViewValue = $this->instructorRegister->CurrentValue;
+            $this->instructorRegister->ViewCustomAttributes = "";
+
+            // federationRegister
+            $this->federationRegister->ViewValue = $this->federationRegister->CurrentValue;
+            $this->federationRegister->ViewCustomAttributes = "";
+
+            // memberCityId
+            $this->memberCityId->ViewValue = $this->memberCityId->CurrentValue;
+            $this->memberCityId->ViewValue = FormatNumber($this->memberCityId->ViewValue, $this->memberCityId->formatPattern());
+            $this->memberCityId->ViewCustomAttributes = "";
+
+            // id
+            $this->id->LinkCustomAttributes = "";
+            $this->id->HrefValue = "";
+
+            // judgeMemberId
+            $this->judgeMemberId->LinkCustomAttributes = "";
+            $this->judgeMemberId->HrefValue = "";
+
+            // testId
+            $this->testId->LinkCustomAttributes = "";
+            $this->testId->HrefValue = "";
+
+            // rankId
+            $this->rankId->LinkCustomAttributes = "";
+            $this->rankId->HrefValue = "";
+
+            // instructorRegister
+            $this->instructorRegister->LinkCustomAttributes = "";
+            $this->instructorRegister->HrefValue = "";
+
+            // federationRegister
+            $this->federationRegister->LinkCustomAttributes = "";
+            $this->federationRegister->HrefValue = "";
+
+            // memberCityId
+            $this->memberCityId->LinkCustomAttributes = "";
+            $this->memberCityId->HrefValue = "";
+        } elseif ($this->RowType == ROWTYPE_EDIT) {
+            // id
+            $this->id->setupEditAttributes();
+            $this->id->EditCustomAttributes = "";
+            $this->id->EditValue = $this->id->CurrentValue;
+            $this->id->ViewCustomAttributes = "";
+
+            // judgeMemberId
+            $this->judgeMemberId->setupEditAttributes();
+            $this->judgeMemberId->EditCustomAttributes = "";
+            $this->judgeMemberId->EditValue = HtmlEncode($this->judgeMemberId->CurrentValue);
+            $this->judgeMemberId->PlaceHolder = RemoveHtml($this->judgeMemberId->caption());
+            if (strval($this->judgeMemberId->EditValue) != "" && is_numeric($this->judgeMemberId->EditValue)) {
+                $this->judgeMemberId->EditValue = FormatNumber($this->judgeMemberId->EditValue, null);
+            }
+
+            // testId
+            $this->testId->setupEditAttributes();
+            $this->testId->EditCustomAttributes = "";
+            $this->testId->EditValue = HtmlEncode($this->testId->CurrentValue);
+            $this->testId->PlaceHolder = RemoveHtml($this->testId->caption());
+            if (strval($this->testId->EditValue) != "" && is_numeric($this->testId->EditValue)) {
+                $this->testId->EditValue = FormatNumber($this->testId->EditValue, null);
+            }
+
+            // rankId
+            $this->rankId->setupEditAttributes();
+            $this->rankId->EditCustomAttributes = "";
+            $this->rankId->EditValue = HtmlEncode($this->rankId->CurrentValue);
+            $this->rankId->PlaceHolder = RemoveHtml($this->rankId->caption());
+            if (strval($this->rankId->EditValue) != "" && is_numeric($this->rankId->EditValue)) {
+                $this->rankId->EditValue = FormatNumber($this->rankId->EditValue, null);
+            }
+
+            // instructorRegister
+            $this->instructorRegister->setupEditAttributes();
+            $this->instructorRegister->EditCustomAttributes = "";
+            if (!$this->instructorRegister->Raw) {
+                $this->instructorRegister->CurrentValue = HtmlDecode($this->instructorRegister->CurrentValue);
+            }
+            $this->instructorRegister->EditValue = HtmlEncode($this->instructorRegister->CurrentValue);
+            $this->instructorRegister->PlaceHolder = RemoveHtml($this->instructorRegister->caption());
+
+            // federationRegister
+            $this->federationRegister->setupEditAttributes();
+            $this->federationRegister->EditCustomAttributes = "";
+            if (!$this->federationRegister->Raw) {
+                $this->federationRegister->CurrentValue = HtmlDecode($this->federationRegister->CurrentValue);
+            }
+            $this->federationRegister->EditValue = HtmlEncode($this->federationRegister->CurrentValue);
+            $this->federationRegister->PlaceHolder = RemoveHtml($this->federationRegister->caption());
+
+            // memberCityId
+            $this->memberCityId->setupEditAttributes();
+            $this->memberCityId->EditCustomAttributes = "";
+            $this->memberCityId->EditValue = HtmlEncode($this->memberCityId->CurrentValue);
+            $this->memberCityId->PlaceHolder = RemoveHtml($this->memberCityId->caption());
+            if (strval($this->memberCityId->EditValue) != "" && is_numeric($this->memberCityId->EditValue)) {
+                $this->memberCityId->EditValue = FormatNumber($this->memberCityId->EditValue, null);
+            }
+
+            // Edit refer script
+
+            // id
+            $this->id->LinkCustomAttributes = "";
+            $this->id->HrefValue = "";
+
+            // judgeMemberId
+            $this->judgeMemberId->LinkCustomAttributes = "";
+            $this->judgeMemberId->HrefValue = "";
+
+            // testId
+            $this->testId->LinkCustomAttributes = "";
+            $this->testId->HrefValue = "";
+
+            // rankId
+            $this->rankId->LinkCustomAttributes = "";
+            $this->rankId->HrefValue = "";
+
+            // instructorRegister
+            $this->instructorRegister->LinkCustomAttributes = "";
+            $this->instructorRegister->HrefValue = "";
+
+            // federationRegister
+            $this->federationRegister->LinkCustomAttributes = "";
+            $this->federationRegister->HrefValue = "";
+
+            // memberCityId
+            $this->memberCityId->LinkCustomAttributes = "";
+            $this->memberCityId->HrefValue = "";
+        }
+        if ($this->RowType == ROWTYPE_ADD || $this->RowType == ROWTYPE_EDIT || $this->RowType == ROWTYPE_SEARCH) { // Add/Edit/Search row
+            $this->setupFieldTitles();
+        }
+
+        // Call Row Rendered event
+        if ($this->RowType != ROWTYPE_AGGREGATEINIT) {
+            $this->rowRendered();
+        }
+    }
+
+    // Validate form
+    protected function validateForm()
+    {
+        global $Language;
+
+        // Check if validation required
+        if (!Config("SERVER_VALIDATE")) {
+            return true;
+        }
+        $validateForm = true;
+        if ($this->id->Required) {
+            if (!$this->id->IsDetailKey && EmptyValue($this->id->FormValue)) {
+                $this->id->addErrorMessage(str_replace("%s", $this->id->caption(), $this->id->RequiredErrorMessage));
+            }
+        }
+        if ($this->judgeMemberId->Required) {
+            if (!$this->judgeMemberId->IsDetailKey && EmptyValue($this->judgeMemberId->FormValue)) {
+                $this->judgeMemberId->addErrorMessage(str_replace("%s", $this->judgeMemberId->caption(), $this->judgeMemberId->RequiredErrorMessage));
+            }
+        }
+        if (!CheckInteger($this->judgeMemberId->FormValue)) {
+            $this->judgeMemberId->addErrorMessage($this->judgeMemberId->getErrorMessage(false));
+        }
+        if ($this->testId->Required) {
+            if (!$this->testId->IsDetailKey && EmptyValue($this->testId->FormValue)) {
+                $this->testId->addErrorMessage(str_replace("%s", $this->testId->caption(), $this->testId->RequiredErrorMessage));
+            }
+        }
+        if (!CheckInteger($this->testId->FormValue)) {
+            $this->testId->addErrorMessage($this->testId->getErrorMessage(false));
+        }
+        if ($this->rankId->Required) {
+            if (!$this->rankId->IsDetailKey && EmptyValue($this->rankId->FormValue)) {
+                $this->rankId->addErrorMessage(str_replace("%s", $this->rankId->caption(), $this->rankId->RequiredErrorMessage));
+            }
+        }
+        if (!CheckInteger($this->rankId->FormValue)) {
+            $this->rankId->addErrorMessage($this->rankId->getErrorMessage(false));
+        }
+        if ($this->instructorRegister->Required) {
+            if (!$this->instructorRegister->IsDetailKey && EmptyValue($this->instructorRegister->FormValue)) {
+                $this->instructorRegister->addErrorMessage(str_replace("%s", $this->instructorRegister->caption(), $this->instructorRegister->RequiredErrorMessage));
+            }
+        }
+        if ($this->federationRegister->Required) {
+            if (!$this->federationRegister->IsDetailKey && EmptyValue($this->federationRegister->FormValue)) {
+                $this->federationRegister->addErrorMessage(str_replace("%s", $this->federationRegister->caption(), $this->federationRegister->RequiredErrorMessage));
+            }
+        }
+        if ($this->memberCityId->Required) {
+            if (!$this->memberCityId->IsDetailKey && EmptyValue($this->memberCityId->FormValue)) {
+                $this->memberCityId->addErrorMessage(str_replace("%s", $this->memberCityId->caption(), $this->memberCityId->RequiredErrorMessage));
+            }
+        }
+        if (!CheckInteger($this->memberCityId->FormValue)) {
+            $this->memberCityId->addErrorMessage($this->memberCityId->getErrorMessage(false));
+        }
+
+        // Return validate result
+        $validateForm = $validateForm && !$this->hasInvalidFields();
+
+        // Call Form_CustomValidate event
+        $formCustomError = "";
+        $validateForm = $validateForm && $this->formCustomValidate($formCustomError);
+        if ($formCustomError != "") {
+            $this->setFailureMessage($formCustomError);
+        }
+        return $validateForm;
+    }
+
+    // Update record based on key values
+    protected function editRow()
+    {
+        global $Security, $Language;
+        $oldKeyFilter = $this->getRecordFilter();
+        $filter = $this->applyUserIDFilters($oldKeyFilter);
+        $conn = $this->getConnection();
+
+        // Load old row
+        $this->CurrentFilter = $filter;
+        $sql = $this->getCurrentSql();
+        $rsold = $conn->fetchAssociative($sql);
+        if (!$rsold) {
+            $this->setFailureMessage($Language->phrase("NoRecord")); // Set no record message
+            return false; // Update Failed
+        } else {
+            // Save old values
+            $this->loadDbValues($rsold);
+        }
+
+        // Set new row
+        $rsnew = [];
+
+        // judgeMemberId
+        $this->judgeMemberId->setDbValueDef($rsnew, $this->judgeMemberId->CurrentValue, null, $this->judgeMemberId->ReadOnly);
+
+        // testId
+        $this->testId->setDbValueDef($rsnew, $this->testId->CurrentValue, null, $this->testId->ReadOnly);
+
+        // rankId
+        $this->rankId->setDbValueDef($rsnew, $this->rankId->CurrentValue, null, $this->rankId->ReadOnly);
+
+        // instructorRegister
+        $this->instructorRegister->setDbValueDef($rsnew, $this->instructorRegister->CurrentValue, null, $this->instructorRegister->ReadOnly);
+
+        // federationRegister
+        $this->federationRegister->setDbValueDef($rsnew, $this->federationRegister->CurrentValue, null, $this->federationRegister->ReadOnly);
+
+        // memberCityId
+        $this->memberCityId->setDbValueDef($rsnew, $this->memberCityId->CurrentValue, null, $this->memberCityId->ReadOnly);
+
+        // Update current values
+        $this->setCurrentValues($rsnew);
+
+        // Call Row Updating event
+        $updateRow = $this->rowUpdating($rsold, $rsnew);
+        if ($updateRow) {
+            if (count($rsnew) > 0) {
+                $this->CurrentFilter = $filter; // Set up current filter
+                $editRow = $this->update($rsnew, "", $rsold);
+            } else {
+                $editRow = true; // No field to update
+            }
+            if ($editRow) {
+            }
+        } else {
+            if ($this->getSuccessMessage() != "" || $this->getFailureMessage() != "") {
+                // Use the message, do nothing
+            } elseif ($this->CancelMessage != "") {
+                $this->setFailureMessage($this->CancelMessage);
+                $this->CancelMessage = "";
+            } else {
+                $this->setFailureMessage($Language->phrase("UpdateCancelled"));
+            }
+            $editRow = false;
+        }
+
+        // Call Row_Updated event
+        if ($editRow) {
+            $this->rowUpdated($rsold, $rsnew);
+        }
+
+        // Clean upload path if any
+        if ($editRow) {
+        }
+
+        // Write JSON for API request
+        if (IsApi() && $editRow) {
+            $row = $this->getRecordsFromRecordset([$rsnew], true);
+            WriteJson(["success" => true, $this->TableVar => $row]);
+        }
+        return $editRow;
+    }
+
+    // Set up Breadcrumb
+    protected function setupBreadcrumb()
+    {
+        global $Breadcrumb, $Language;
+        $Breadcrumb = new Breadcrumb("index");
+        $url = CurrentUrl();
+        $Breadcrumb->add("list", $this->TableVar, $this->addMasterUrl("TesTestJudgeList"), "", $this->TableVar, true);
+        $pageId = "edit";
+        $Breadcrumb->add("edit", $pageId, $url);
+    }
+
+    // Setup lookup options
+    public function setupLookupOptions($fld)
+    {
+        if ($fld->Lookup !== null && $fld->Lookup->Options === null) {
+            // Get default connection and filter
+            $conn = $this->getConnection();
+            $lookupFilter = "";
+
+            // No need to check any more
+            $fld->Lookup->Options = [];
+
+            // Set up lookup SQL and connection
+            switch ($fld->FieldVar) {
+                default:
+                    $lookupFilter = "";
+                    break;
+            }
+
+            // Always call to Lookup->getSql so that user can setup Lookup->Options in Lookup_Selecting server event
+            $sql = $fld->Lookup->getSql(false, "", $lookupFilter, $this);
+
+            // Set up lookup cache
+            if (!$fld->hasLookupOptions() && $fld->UseLookupCache && $sql != "" && count($fld->Lookup->Options) == 0) {
+                $totalCnt = $this->getRecordCount($sql, $conn);
+                if ($totalCnt > $fld->LookupCacheCount) { // Total count > cache count, do not cache
+                    return;
+                }
+                $rows = $conn->executeQuery($sql)->fetchAll();
+                $ar = [];
+                foreach ($rows as $row) {
+                    $row = $fld->Lookup->renderViewRow($row, Container($fld->Lookup->LinkTable));
+                    $ar[strval($row["lf"])] = $row;
+                }
+                $fld->Lookup->Options = $ar;
+            }
+        }
+    }
+
+    // Set up starting record parameters
+    public function setupStartRecord()
+    {
+        if ($this->DisplayRecords == 0) {
+            return;
+        }
+        if ($this->isPageRequest()) { // Validate request
+            $startRec = Get(Config("TABLE_START_REC"));
+            if ($startRec !== null && is_numeric($startRec)) { // Check for "start" parameter
+                $this->StartRecord = $startRec;
+                $this->setStartRecordNumber($this->StartRecord);
+            }
+        }
+        $this->StartRecord = $this->getStartRecordNumber();
+
+        // Check if correct start record counter
+        if (!is_numeric($this->StartRecord) || $this->StartRecord == "") { // Avoid invalid start record counter
+            $this->StartRecord = 1; // Reset start record counter
+            $this->setStartRecordNumber($this->StartRecord);
+        } elseif ($this->StartRecord > $this->TotalRecords) { // Avoid starting record > total records
+            $this->StartRecord = (int)(($this->TotalRecords - 1) / $this->DisplayRecords) * $this->DisplayRecords + 1; // Point to last page first record
+            $this->setStartRecordNumber($this->StartRecord);
+        } elseif (($this->StartRecord - 1) % $this->DisplayRecords != 0) {
+            $this->StartRecord = (int)(($this->StartRecord - 1) / $this->DisplayRecords) * $this->DisplayRecords + 1; // Point to page boundary
+            $this->setStartRecordNumber($this->StartRecord);
+        }
+    }
+
+    // Page Load event
+    public function pageLoad()
+    {
+        //Log("Page Load");
+    }
+
+    // Page Unload event
+    public function pageUnload()
+    {
+        //Log("Page Unload");
+    }
+
+    // Page Redirecting event
+    public function pageRedirecting(&$url)
+    {
+        // Example:
+        //$url = "your URL";
+    }
+
+    // Message Showing event
+    // $type = ''|'success'|'failure'|'warning'
+    public function messageShowing(&$msg, $type)
+    {
+        if ($type == 'success') {
+            //$msg = "your success message";
+        } elseif ($type == 'failure') {
+            //$msg = "your failure message";
+        } elseif ($type == 'warning') {
+            //$msg = "your warning message";
+        } else {
+            //$msg = "your message";
+        }
+    }
+
+    // Page Render event
+    public function pageRender()
+    {
+        //Log("Page Render");
+    }
+
+    // Page Data Rendering event
+    public function pageDataRendering(&$header)
+    {
+        // Example:
+        //$header = "your header";
+    }
+
+    // Page Data Rendered event
+    public function pageDataRendered(&$footer)
+    {
+        // Example:
+        //$footer = "your footer";
+    }
+
+    // Form Custom Validate event
+    public function formCustomValidate(&$customError)
+    {
+        // Return error message in $customError
+        return true;
+    }
+}

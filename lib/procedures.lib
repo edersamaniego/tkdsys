@@ -1,0 +1,14 @@
+//29/06/2021
+
+CREATE PROCEDURE mas_admin_dev.proc_atualiza_idada_membro()
+  SQL SECURITY INVOKER
+BEGIN
+  UPDATE `school_member` SET `age` = TIMESTAMPDIFF (YEAR,`birthdate`,CURDATE()) Where `birthdate` IS NOT NULL ;
+END
+
+CREATE EVENT updating_members_age
+    ON SCHEDULE EVERY 1 DAY
+    DO
+      CALL proc_atualiza_idada_membro();
+
+//29/06/2021

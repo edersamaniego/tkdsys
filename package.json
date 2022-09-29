@@ -1,0 +1,11 @@
+{
+    "name": "school",
+    "version": "18.12.6",
+    "description": "school",
+    "license": "SEE LICENSE IN LICENSE.md",
+    "private": true,
+    "dependencies": {},
+    "engines": {
+        "node": ">=16"
+    }
+}
